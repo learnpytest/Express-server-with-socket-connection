@@ -9,16 +9,8 @@ let users = []
 
 let messages = []
 
-let myChannels = [{
-  selectedUserId: 21,
-  selectedUserAccount: "Benjamin",
-  selectedUserAvatar: "",
-  messages: [{
-    message: "Hello, this is Benjamin",
-    createAt: "12/10",
-    type: 0,
-  }]
-}]
+let rooms = {}
+
 
 app.get('/', (req, res) => {
   res.send('Hello')
@@ -38,46 +30,95 @@ io.on("connection", socket => {
   socket.emit("allMessages", messages)
   socket.emit("allUsers", users)
 
-  socket.on("fetchSelectedUserMessages", (
-    selectedUserId
-  ) => {
+  socket.on("joinPrivateRoom", ({
+
+    room,
+    selfObj,
+    otherUserObj
+  }) => {
+    // const isOnlineUser = users.find(user => user.account === toAccount)
+
+    // const socketId = isOnlineUser ? isOnlineUser.socketId : null
+
+    // confirm room validation
+    if (!room || room === "undefined") return
+
+    // create room and save to server
+    if (!rooms[room]) {
+      rooms[room] = {
+        users: [],
+        messages: [],
+      }
+    }
 
 
-    let myChannels = [{
-      selectedUserId: 21,
-      selectedUserAccount: "Benjamin",
-      selectedUserAvatar: "",
-      messages: [{
-        message: "Hello, this is Benjamin",
-        createAt: "12/10",
-        type: 0,
-      }]
-    }]
+    const isSelfJoined = rooms[room].users.find(user => user.account === selfObj.account)
+    const isOtherUserJoined = rooms[room].users.find(user => user.account === otherUserObj.account)
 
-    const selectedChannel = myChannels.filter(channel => +channel.selectedUserId === +selectedUserId)
-    // // 歷史對話紀錄回傳
-    socket.emit("returnSelectedUserMessages", selectedChannel[0])
-  })
+    if (!isSelfJoined) {
+      rooms[room].users.push({
+        ...selfObj,
 
-  socket.on("privateMessageToChannel", obj => {
-    console.log("privateMessageToChannel", obj)
-    let toSocketId = null
-    let selectedChannel = {}
-    const selectedUser = users.filter(user => +user.id === +obj.selectedUserId)
-    myChannels = myChannels.map(channel => {
-      if (+channel.selectedUserId === +obj.selectedUserId) {
-        channel.messages.push(obj.content)
-        channel.toSocketId = selectedUser.socketId
-        toSocketId = selectedUser.socketId
-        selectedChannel = {
-          ...channel
+      })
+    }
+    if (!isOtherUserJoined) {
+      rooms[room].users.push({
+
+        ...otherUserObj
+      })
+    }
+
+    // join room
+    socket.join(room)
+
+
+    // fetch hitsory of all rooms from server upon joining room
+    let leaveOnlyJoinedRooms = {}
+    for (let [roomId, roomObj] of Object.entries(rooms)) {
+      if (roomObj.users.find(user => user.userId === selfObj.userId)) {
+        leaveOnlyJoinedRooms[roomId] = {
+          ...roomObj
         }
       }
-      return channel
-    })
-    if (toSocketId) {
-      socket.to(toSocketId).emit("returnSelectedUserMessages", selectedChannel)
     }
+
+
+    socket.emit("setOnlyJoinedRooms",
+      leaveOnlyJoinedRooms
+    )
+
+    // fetch hitsory of this room from server upon joining room
+    socket.emit("allRoomMessages", {
+      room,
+      data: rooms[room],
+
+    })
+
+
+
+
+
+  })
+
+  //user send new room message and inform other users excluding self in room 
+  socket.on("roomMessage", data => {
+    const {
+      room,
+
+    } = data
+    // save new room message on server
+
+    rooms[room].messages.push({
+      ...data
+    })
+    socket.to(room).emit("appendRoomMessage", {
+      room,
+      message: {
+        ...data
+      }
+    })
+
+
   })
 
   socket.on("leaved", obj => {
@@ -127,6 +168,8 @@ io.on("connection", socket => {
   socket.on("user", obj => {
     // username來自前端進入聊天室的動作
     console.log(`${obj} has arrived the chatroom`)
+
+
     // socket.username = username
     // users.push(socket)
 
@@ -150,14 +193,8 @@ io.on("connection", socket => {
     users.push({
       ...obj,
       socketId: socket.id,
-      self: socket.id
     })
     io.emit("allUsers", users)
-
-
-    socket.on("disconnect", () => {
-      console.log(`${socket.username} has left the chatroom.`)
-    })
 
   })
 
